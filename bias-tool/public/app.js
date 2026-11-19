@@ -75,7 +75,7 @@
 
         // Notices
         const notes = [];
-        if (d.status.demo) notes.push('Demo mode: invented headlines and synthetic prices. Run without DEMO=1 for live data.');
+        if (d.status.demo) notes.push('Demo mode: invented headlines and made-up prices. For real news, stop this (Ctrl + C) and run npm start.');
         if (d.status.classifier.lastError) notes.push(d.status.classifier.lastError);
         if (d.prices.error) notes.push(`Prices unavailable (${d.prices.error}).`);
         $('notice').hidden = notes.length === 0;
