@@ -18,21 +18,59 @@ consensus:
                                                    (prices.js)
 ```
 
-## Run it
+## Run it (step by step)
+
+**1. Install Node.js** (one time). Download the "LTS" version from
+<https://nodejs.org> and install it with the default options.
+
+**2. Get the code.** Either download it as a ZIP:
+<https://github.com/ahmadmoa/getting-started/archive/refs/heads/claude/build-similar-tool-h89h3m.zip>
+and unzip it, or use git:
 
 ```bash
-cd bias-tool
-npm install
-
-# 1. Demo: invented headlines + synthetic prices, no key or network needed
-npm run demo                     # http://localhost:3000
-
-# 2. Live: real feeds, Claude judgments, Yahoo prices
-export ANTHROPIC_API_KEY=sk-ant-...
-npm start
-
-npm test                         # scoring, session window, dedupe
+git clone -b claude/build-similar-tool-h89h3m https://github.com/ahmadmoa/getting-started.git
 ```
+
+**3. Open a terminal in the `bias-tool` folder.**
+- Windows: open the `bias-tool` folder in File Explorer, click the address
+  bar, type `cmd` and press Enter.
+- Mac: right-click the `bias-tool` folder in Finder, then choose
+  **Services → New Terminal at Folder**.
+
+**4. Install and start the demo** (free, no key needed). Type:
+
+```bash
+npm install
+npm run demo
+```
+
+Open <http://localhost:3000> in your browser. You'll see invented headlines and
+made-up prices, so you can learn the screen. To stop it, press `Ctrl + C` in
+the terminal.
+
+**5. Go live with real news.**
+1. Get an API key at <https://console.anthropic.com> → **API Keys**. Usage
+   is billed; see [Cost](#cost).
+2. In the `bias-tool` folder, copy `.env.example` to a new file named `.env`
+   and paste your key after `ANTHROPIC_API_KEY=`.
+3. Run `npm start` and open <http://localhost:3000>. New headlines are judged
+   within a minute or two. Leave the terminal open while you use it.
+
+To check the scoring code still works: `npm test`.
+
+## Using the screen
+
+- **Asset buttons** across the top switch between Gold, Nasdaq, EUR/USD, and the
+  rest. The page refreshes itself every 30 seconds.
+- **Bullish / Bearish** and its lean (slight, moderate, strong) is the overall
+  call. The three boxes show how the headline weight splits higher, mixed and
+  lower.
+- **Right now** shows how far price has moved since the start of each candle
+  (daily down to 5 minutes). Use it to see whether price agrees with the news.
+- **Stories driving** groups the headlines into themes and shows which theme
+  matters most.
+- **Headlines**: click one to see Claude's one-line reason. **Most relevant**
+  puts the heaviest headlines (high impact and recent) first.
 
 You can also push headlines from anything you like, such as your own scraper,
 a Telegram or Discord squawk bot, or a paid news webhook:
@@ -98,6 +136,9 @@ delayed). For anything serious, plug in your broker or a paid feed (OANDA,
 Polygon, Twelve Data) by adding a provider next to `yahooTiles`.
 
 ## Configuration
+
+Put any of these in the `.env` file (one `NAME=value` per line), or set them
+in the terminal before `npm start`.
 
 | env var | default | |
 |---|---|---|

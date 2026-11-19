@@ -1,6 +1,16 @@
 // Everything you are likely to tune lives here or in environment variables.
+// Settings can also go in a `.env` file next to package.json (see .env.example).
+
+const path = require('path');
+
+try {
+    process.loadEnvFile(path.join(__dirname, '..', '.env'));
+} catch {
+    // no .env file: use the real environment only
+}
 
 const env = process.env;
+const isDemo = env.DEMO === '1' || env.DEMO === 'true' || process.argv.includes('--demo');
 
 // The instruments the dashboard covers. `notes` is fed to Claude so it knows
 // what each asset is and how it is quoted (a "higher" EUR/USD is a weaker dollar).
@@ -43,7 +53,7 @@ module.exports = {
     ASSETS,
     THEMES,
     PORT: num(env.PORT, 3000),
-    DEMO: env.DEMO === '1' || env.DEMO === 'true',
+    DEMO: isDemo,
 
     // Window: headlines since the last session open. 17:00 New York is the
     // daily FX/futures roll, i.e. the start of the trading day.
@@ -78,7 +88,7 @@ module.exports = {
     MARKET_CONTEXT: env.MARKET_CONTEXT || '',
 
     // Prices: "yahoo" (free, unofficial, delayed) or "demo" (synthetic).
-    PRICE_PROVIDER: env.PRICE_PROVIDER || (env.DEMO === '1' || env.DEMO === 'true' ? 'demo' : 'yahoo'),
+    PRICE_PROVIDER: env.PRICE_PROVIDER || (isDemo ? 'demo' : 'yahoo'),
 
-    DATA_FILE: env.DATA_FILE || require('path').join(__dirname, '..', 'data', 'headlines.json'),
+    DATA_FILE: env.DATA_FILE || path.join(__dirname, '..', 'data', 'headlines.json'),
 };
