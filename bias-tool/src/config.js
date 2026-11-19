@@ -12,6 +12,10 @@ try {
 const env = process.env;
 const isDemo = env.DEMO === '1' || env.DEMO === 'true' || process.argv.includes('--demo');
 
+// How headlines get judged: "api" with an API key, or "claude-code" through
+// the Claude Code program signed in with your own Claude plan.
+const judgeWith = env.JUDGE_WITH || (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN ? 'api' : 'claude-code');
+
 // The instruments the dashboard covers. `notes` is fed to Claude so it knows
 // what each asset is and how it is quoted (a "higher" EUR/USD is a weaker dollar).
 // `yahoo` is the ticker used by the Yahoo price provider; swap for your broker's.
@@ -47,6 +51,14 @@ const THEMES = [
     'Other news',
 ];
 
+// Where the Claude Code program is. The official installer puts it in
+// ~/.local/bin, which a terminal opened before the install may not know about.
+function findClaude() {
+    const fs = require('fs');
+    const native = path.join(require('os').homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude');
+    return fs.existsSync(native) ? native : 'claude';
+}
+
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 
 module.exports = {
@@ -75,10 +87,13 @@ module.exports = {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
-    POLL_SECONDS: num(env.POLL_SECONDS, 60),
+    // Claude Code mode checks less often so it uses less of your plan's limits.
+    POLL_SECONDS: num(env.POLL_SECONDS, judgeWith === 'claude-code' ? 300 : 60),
     INGEST_TOKEN: env.INGEST_TOKEN || '', // protects POST /api/headlines when set
 
     // Claude classification.
+    JUDGE_WITH: judgeWith,
+    CLAUDE_CODE_PATH: env.CLAUDE_CODE_PATH || findClaude(),
     CLASSIFY_MODEL: env.CLASSIFY_MODEL || 'claude-opus-5-5',
     CLASSIFY_EFFORT: env.CLASSIFY_EFFORT || 'low',
     CLASSIFY_BATCH: num(env.CLASSIFY_BATCH, 12),

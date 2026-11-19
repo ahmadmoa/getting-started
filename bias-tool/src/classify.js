@@ -1,6 +1,9 @@
 // Claude reads each headline once and judges it for every asset at the same
 // time, so cost grows with the number of headlines, not assets x headlines.
 
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
 const Anthropic = require('@anthropic-ai/sdk');
 const config = require('./config');
 
@@ -66,6 +69,13 @@ Current market regime (from the operator):
 ${regime}`;
 }
 
+// ---- Two ways to reach Claude ---------------------------------------------
+//
+// "api":         the Claude API with your own API key (pay per use).
+// "claude-code": the Claude Code program installed on your PC, signed in with
+//                your own Claude plan (Pro/Max). No API key; uses your plan's
+//                usage limits. For your own personal use on your own machine.
+
 let client;
 function getClient() {
     if (!client) client = new Anthropic();
@@ -73,16 +83,16 @@ function getClient() {
 }
 
 let lastError = null;
-const status = () => ({ model: config.CLASSIFY_MODEL, effort: config.CLASSIFY_EFFORT, lastError });
+const status = () => ({ via: config.JUDGE_WITH, model: config.CLASSIFY_MODEL, effort: config.CLASSIFY_EFFORT, lastError });
 
-/**
- * Judges a batch of headlines. Returns a Map id -> { theme, impact, judgments }.
- * Headlines missing from the map stay pending and are retried next cycle.
- */
-async function classifyBatch(headlines) {
-    if (headlines.length === 0) return new Map();
+function userPrompt(headlines) {
     const lines = headlines.map((h) => JSON.stringify({ id: h.id, headline: h.title, source: h.source }));
+    return `Score these ${headlines.length} headlines. One result per id.\n\n${lines.join('\n')}`;
+}
 
+// Returns { parsed } on success, { retrySplit: true } when the output was cut
+// off, or { declined: true } on a refusal. Throws on errors.
+async function viaApi(headlines) {
     let response;
     try {
         response = await getClient().beta.messages.create({
@@ -97,12 +107,7 @@ async function classifyBatch(headlines) {
                 format: { type: 'json_schema', schema: SCHEMA },
             },
             system: [{ type: 'text', text: systemPrompt(), cache_control: { type: 'ephemeral' } }],
-            messages: [
-                {
-                    role: 'user',
-                    content: `Score these ${headlines.length} headlines. One result per id.\n\n${lines.join('\n')}`,
-                },
-            ],
+            messages: [{ role: 'user', content: userPrompt(headlines) }],
         });
     } catch (err) {
         if (err instanceof Anthropic.AuthenticationError) {
@@ -118,26 +123,111 @@ async function classifyBatch(headlines) {
         }
         throw err;
     }
+    if (response.stop_reason === 'refusal') return { declined: true };
+    if (response.stop_reason === 'max_tokens') return { retrySplit: true };
+    const text = response.content
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+    return { parsed: JSON.parse(text) };
+}
 
-    if (response.stop_reason === 'refusal') {
+function runClaudeCode(stdinText) {
+    const args = [
+        '-p',
+        '--output-format', 'json',
+        '--json-schema', JSON.stringify(SCHEMA),
+        '--system-prompt', systemPrompt(),
+        '--tools', '', // no tools: it only reads the headlines and answers
+        '--strict-mcp-config',
+        '--disable-slash-commands',
+        '--no-session-persistence',
+        '--model', config.CLASSIFY_MODEL,
+        '--effort', config.CLASSIFY_EFFORT,
+    ];
+    // Use the plan login, not an API key that may sit in the environment.
+    const env = { ...process.env };
+    delete env.ANTHROPIC_API_KEY;
+    delete env.CLAUDECODE;
+    // Run in an empty folder so no project files or CLAUDE.md get pulled in.
+    const cwd = path.join(path.dirname(config.DATA_FILE), 'claude-code-run');
+    fs.mkdirSync(cwd, { recursive: true });
+
+    return new Promise((resolve, reject) => {
+        const child = spawn(config.CLAUDE_CODE_PATH, args, { cwd, env, windowsHide: true });
+        let out = '';
+        let err = '';
+        const timer = setTimeout(() => child.kill(), 5 * 60 * 1000);
+        child.stdout.on('data', (d) => (out += d));
+        child.stderr.on('data', (d) => (err += d));
+        child.on('error', (e) => {
+            clearTimeout(timer);
+            reject(e);
+        });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            resolve({ code, out, err });
+        });
+        child.stdin.end(stdinText);
+    });
+}
+
+async function viaClaudeCode(headlines) {
+    let run;
+    try {
+        run = await runClaudeCode(userPrompt(headlines));
+    } catch (err) {
+        lastError =
+            err.code === 'ENOENT'
+                ? 'Claude Code was not found. Install it (see README) or set CLAUDE_CODE_PATH to where claude is installed.'
+                : `Could not start Claude Code: ${err.message}`;
+        throw err;
+    }
+    let result = null;
+    try {
+        result = JSON.parse(run.out);
+    } catch {
+        // not JSON: fall through with the raw text
+    }
+    if (result && result.structured_output) return { parsed: result.structured_output };
+
+    const message = String((result && result.result) || run.err || run.out || `exit code ${run.code}`).trim();
+    if (/log ?in|logged|auth|credential|401/i.test(message)) {
+        lastError = 'Claude Code is not signed in. Open a terminal, run claude, and sign in with your Claude account.';
+    } else if (/limit|quota|429|rate/i.test(message)) {
+        lastError = 'Your Claude plan usage limit is reached; judging resumes when it resets.';
+    } else {
+        lastError = `Claude Code failed: ${message.slice(0, 200)}`;
+    }
+    throw new Error(lastError);
+}
+
+/**
+ * Judges a batch of headlines. Returns a Map id -> { theme, impact, judgments }.
+ * Headlines missing from the map stay pending and are retried next cycle.
+ */
+async function classifyBatch(headlines) {
+    if (headlines.length === 0) return new Map();
+
+    const res = config.JUDGE_WITH === 'claude-code' ? await viaClaudeCode(headlines) : await viaApi(headlines);
+
+    if (res.declined) {
         lastError = 'Claude declined this batch; it will be retried.';
         return new Map();
     }
-    if (response.stop_reason === 'max_tokens' && headlines.length > 1) {
+    if (res.retrySplit && headlines.length > 1) {
         // Output got cut off: split the batch and try the halves.
         const mid = Math.ceil(headlines.length / 2);
         const a = await classifyBatch(headlines.slice(0, mid));
         const b = await classifyBatch(headlines.slice(mid));
         return new Map([...a, ...b]);
     }
-
-    const text = response.content
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-    const parsed = JSON.parse(text);
+    if (!res.parsed) return new Map();
     lastError = null;
+    return normalize(res.parsed, headlines);
+}
 
+function normalize(parsed, headlines) {
     const wanted = new Set(headlines.map((h) => h.id));
     const out = new Map();
     for (const r of parsed.results || []) {

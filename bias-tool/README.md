@@ -48,13 +48,34 @@ Open <http://localhost:3000> in your browser. You'll see invented headlines and
 made-up prices, so you can learn the screen. To stop it, press `Ctrl + C` in
 the terminal.
 
-**5. Go live with real news.**
-1. Get an API key at <https://console.anthropic.com> → **API Keys**. Usage
-   is billed; see [Cost](#cost).
+**5. Go live with real news.** Choose one way for Claude to judge headlines.
+
+*Option A: your Claude plan (Pro/Max), no API key and no extra bill.* The
+tool calls the Claude Code program on your PC, signed in with your own
+account. It uses your plan's usage limits, the same limits your chats use,
+so it checks for news every 5 minutes instead of every minute. This is for
+your own personal use on your own machine.
+
+1. Install Claude Code. Open a **new** terminal and run:
+   - Windows (PowerShell): `irm https://claude.ai/install.ps1 | iex`
+   - Windows (CMD): `curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd`
+   - Mac: `curl -fsSL https://claude.ai/install.sh | bash`
+2. Sign in once: run `claude`, follow the browser prompts with your Claude
+   account, then type `/exit`.
+3. In the `bias-tool` folder, run `npm start` and open
+   <http://localhost:3000>.
+
+*Option B: an API key (pay per use, separate from your plan).*
+
+1. Get an API key at <https://console.anthropic.com> → **API Keys**, and add
+   credit. Usage is billed; see [Cost](#cost).
 2. In the `bias-tool` folder, copy `.env.example` to a new file named `.env`
-   and paste your key after `ANTHROPIC_API_KEY=`.
-3. Run `npm start` and open <http://localhost:3000>. New headlines are judged
-   within a minute or two. Leave the terminal open while you use it.
+   and add the line `ANTHROPIC_API_KEY=` followed by your key.
+3. Run `npm start` and open <http://localhost:3000>.
+
+Either way, headlines start as "Not judged yet" and get judged within a few
+minutes. Leave the terminal open while you use it. If something is wrong, the
+yellow banner says what.
 
 To check the scoring code still works: `npm test`.
 
@@ -88,7 +109,10 @@ and hashed, so the same story from two feeds is stored once. New headlines
 start as **Not judged yet**.
 
 ### 2. Judge (`src/classify.js`)
-Pending headlines go to Claude in batches of `CLASSIFY_BATCH` (default 12).
+Pending headlines go to Claude in batches of `CLASSIFY_BATCH` (default 12),
+either through the Claude Code program (`JUDGE_WITH=claude-code`: runs
+`claude -p` with no tools and a fixed JSON format) or the Claude API
+(`JUDGE_WITH=api`).
 One call judges a headline for **all** assets at once, so cost scales with the
 number of headlines, not headlines × assets. For each headline Claude returns:
 
@@ -142,12 +166,14 @@ in the terminal before `npm start`.
 
 | env var | default | |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | | Claude credentials |
+| `JUDGE_WITH` | `claude-code`, or `api` when an API key is set | how headlines get judged (see step 5) |
+| `ANTHROPIC_API_KEY` | | API key, for `JUDGE_WITH=api` |
+| `CLAUDE_CODE_PATH` | auto-detected | where the `claude` program is, if it isn't found |
 | `CLASSIFY_MODEL` | `claude-opus-5-5` | set `claude-haiku-5-5` to cut cost ~40× (check that quality holds) |
 | `CLASSIFY_EFFORT` | `low` | `low`/`medium`/`high`. Higher means more careful judgments but slower and costlier |
 | `MARKET_CONTEXT` | | regime notes passed to Claude (see above) |
 | `NEWS_FEEDS` | 3 public RSS feeds | comma-separated RSS/Atom URLs |
-| `POLL_SECONDS` | `60` | how often to pull feeds and judge |
+| `POLL_SECONDS` | `300` (claude-code) / `60` (api) | how often to pull feeds and judge |
 | `SESSION_OPEN` / `SESSION_TZ` | `17:00` / `America/New_York` | window start; e.g. `09:30` for the US cash open |
 | `DECAY_TAU_MIN` | `170` | recency decay; smaller makes the board react faster |
 | `PRICE_PROVIDER` | `yahoo` (`demo` in demo mode) | |
@@ -159,6 +185,13 @@ a name and a one-line note on what moves it and how it is quoted. Claude
 reads those notes.
 
 ## Cost
+
+With **Option A** (your Claude plan) there is no extra bill; judging uses
+your plan's usage limits. If you hit the limit, the banner says so and
+judging resumes when the limit resets. Use `CLASSIFY_MODEL=claude-haiku-5-5`
+or a longer `POLL_SECONDS` to use less.
+
+With **Option B** (API key):
 
 A rough estimate on Opus 5.5 at low effort: about $0.005 per headline, judged
 once for all 16 assets. At 500 headlines a day that is about $2–3 a day. Haiku
